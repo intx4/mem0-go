@@ -15,7 +15,13 @@ type APIVersion string
 const (
 	V1 APIVersion = "v1"
 	V2 APIVersion = "v2"
+
+	DefaultAPIVersion APIVersion = V2
 )
+
+func (v APIVersion) IsDefault() bool {
+	return v == DefaultAPIVersion || v == ""
+}
 
 // Feedback 定义反馈类型
 type Feedback string
@@ -48,13 +54,29 @@ type MemoryOptions struct {
 	EnableGraph        bool             `json:"enable_graph,omitempty"`
 	StartDate          string           `json:"start_date,omitempty"`
 	EndDate            string           `json:"end_date,omitempty"`
-	CustomCategories   []CustomCategory `json:"custom_categories,omitempty"`
+	CustomCategories   CustomCategories `json:"custom_categories,omitempty"`
 	CustomInstructions string           `json:"custom_instructions,omitempty"`
 	Messages           []Message        `json:"messages,omitempty"`
 }
 
-// CustomCategory 定义自定义类别
-type CustomCategory map[string]any
+type CustomCategories []CustomCategory
+
+var _ json.Marshaler = CustomCategories{}
+
+func (c CustomCategories) MarshalJSON() ([]byte, error) {
+	m := make([]map[string]string, len(c))
+	for i, category := range c {
+		m[i] = map[string]string{
+			category.CategoryName: category.CategoryDescription,
+		}
+	}
+	return json.Marshal(m)
+}
+
+type CustomCategory struct {
+	CategoryName        string `json:"category_name"`
+	CategoryDescription string `json:"category_description"`
+}
 
 // Message 定义消息
 type Message struct {
@@ -71,7 +93,7 @@ type MemoryHistory struct {
 	NewMemory  string    `json:"new_memory,omitempty"`
 	UserID     string    `json:"user_id"`
 	Categories []string  `json:"categories"`
-	Event      string    `json:"event"`
+	Event      EventType `json:"event"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
 }
@@ -80,7 +102,7 @@ type MemoryHistory struct {
 type Memory struct {
 	ID         string         `json:"id"`
 	Messages   []Message      `json:"messages,omitempty"`
-	Event      string         `json:"event,omitempty"`
+	Event      EventType      `json:"event,omitempty"`
 	Data       *MemoryData    `json:"data,omitempty"`
 	Memory     string         `json:"memory,omitempty"`
 	UserID     string         `json:"user_id,omitempty"`
@@ -94,7 +116,54 @@ type Memory struct {
 	Owner      string         `json:"owner,omitempty"`
 	AgentID    string         `json:"agent_id,omitempty"`
 	AppID      string         `json:"app_id,omitempty"`
-	RunID      string         `json:"run_id,omitempty"`
+	RunID      string         `json:"session_id,omitempty"`
+}
+
+type EventStatus string
+
+const (
+	EventStatusPENDING   EventStatus = "PENDING"
+	EventStatusRUNNING   EventStatus = "RUNNING"
+	EventStatusSUCCEEDED EventStatus = "SUCCEEDED"
+	EventStatusFAILED    EventStatus = "FAILED"
+)
+
+type EventType string
+
+const (
+	EventTypeGetAll       EventType = "GET_ALL"
+	EventTypeSearch       EventType = "SEARCH"
+	EventTypeMemoryAdd    EventType = "ADD"
+	EventTypeMemoryUpdate EventType = "UPDATE"
+	EventTypeMemoryDelete EventType = "DELETE"
+)
+
+type MemoryAddAEvent struct {
+	Message string      `json:"message"`
+	Status  EventStatus `json:"status"`
+	EventID string      `json:"event_id"`
+}
+
+// Event 定义事件
+type Event struct {
+	ID          string         `json:"id"`
+	EventType   EventType      `json:"event_type"`
+	Status      EventStatus    `json:"status"`
+	Payload     map[string]any `json:"payload"`
+	Metadata    map[string]any `json:"metadata"`
+	Results     []any          `json:"results"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	StartedAt   time.Time      `json:"started_at,omitempty"`
+	CompletedAt time.Time      `json:"completed_at,omitempty"`
+	Latency     float64        `json:"latency"`
+}
+
+type GetEventsResponse struct {
+	Count    int64   `json:"count"`
+	Results  []Event `json:"results"`
+	Next     string  `json:"next"`
+	Previous string  `json:"previous"`
 }
 
 // MemoryData 定义内存数据
@@ -176,18 +245,20 @@ type FeedbackPayload struct {
 	FeedbackReason string   `json:"feedback_reason,omitempty"`
 }
 
+const SearchWildcard = "*"
+
 // SearchOptions 定义搜索选项
 type SearchOptions struct {
 	MemoryOptions
-	Limit                   int      `json:"limit,omitempty"`
-	EnableGraph             bool     `json:"enable_graph,omitempty"`
-	Threshold               float64  `json:"threshold,omitempty"`
-	TopK                    int      `json:"top_k,omitempty"`
-	OnlyMetadataBasedSearch bool     `json:"only_metadata_based_search,omitempty"`
-	KeywordSearch           bool     `json:"keyword_search,omitempty"`
-	Fields                  []string `json:"fields,omitempty"`
-	Categories              []string `json:"categories,omitempty"`
-	Rerank                  bool     `json:"rerank,omitempty"`
+	EnableGraph             bool       `json:"enable_graph,omitempty"`
+	Threshold               float64    `json:"threshold,omitempty"`
+	TopK                    int        `json:"top_k,omitempty"`
+	OnlyMetadataBasedSearch bool       `json:"only_metadata_based_search,omitempty"`
+	KeywordSearch           bool       `json:"keyword_search,omitempty"`
+	Fields                  []string   `json:"fields,omitempty"`
+	Categories              []string   `json:"categories,omitempty"`
+	Rerank                  bool       `json:"rerank,omitempty"`
+	Version                 APIVersion `json:"version,omitempty"`
 }
 
 // ProjectOptions 定义项目选项

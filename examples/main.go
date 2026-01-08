@@ -32,10 +32,14 @@ func main() {
 	fmt.Printf("Search results: %+v\n", results)
 
 	// 获取内存
-	memory, err := mem0.Get(memories[0].ID)
+	memories_, err := mem0.Search("Hello", nil)
 	if err != nil {
 		log.Fatal(err)
 	}
+	if len(memories) == 0 {
+		log.Fatal("No memory found")
+	}
+	memory := memories_[0]
 	fmt.Printf("Got memory: %+v\n", memory)
 
 	// 更新内存

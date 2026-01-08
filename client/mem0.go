@@ -3,11 +3,12 @@ package client
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/bytectlgo/mem0-go/types"
 )
@@ -104,8 +105,10 @@ func (c *MemoryClient) ping() error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: "API key is invalid"}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var data struct {
@@ -115,7 +118,7 @@ func (c *MemoryClient) ping() error {
 		UserEmail string `json:"user_email"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+	if err := json.Unmarshal(body, &data); err != nil {
 		return err
 	}
 
@@ -137,13 +140,20 @@ func (c *MemoryClient) preparePayload(messages interface{}, options types.Memory
 	switch m := messages.(type) {
 	case string:
 		payload["messages"] = []types.Message{{Role: "user", Content: m}}
+	case []string:
+		messages := make([]types.Message, len(m))
+		for i, msg := range m {
+			messages[i] = types.Message{Role: "user", Content: msg}
+		}
+		payload["messages"] = messages
+	case types.Message:
+		payload["messages"] = []types.Message{m}
 	case []types.Message:
 		payload["messages"] = m
 	default:
 		return nil, errors.New("invalid messages type")
 	}
 
-	// 添加组织和项目信息
 	if c.organizationName != "" && c.projectName != "" {
 		options.OrgName = c.organizationName
 		options.ProjectName = c.projectName
@@ -154,7 +164,6 @@ func (c *MemoryClient) preparePayload(messages interface{}, options types.Memory
 		options.ProjectID = c.projectID
 	}
 
-	// 将 options 转换为 map
 	optionsMap := make(map[string]interface{})
 	optionsBytes, err := json.Marshal(options)
 	if err != nil {
@@ -164,16 +173,18 @@ func (c *MemoryClient) preparePayload(messages interface{}, options types.Memory
 		return nil, err
 	}
 
-	// 合并 payload 和 options
 	for k, v := range optionsMap {
 		if v != nil {
 			payload[k] = v
 		}
 	}
 
-	// 确保 messages 字段存在
 	if _, ok := payload["messages"]; !ok {
-		payload["messages"] = []types.Message{}
+		return nil, errors.New("messages field is required")
+	}
+
+	if options.Version.IsDefault() {
+		payload["version"] = types.DefaultAPIVersion
 	}
 
 	return payload, nil
@@ -204,8 +215,10 @@ func (c *MemoryClient) doRequest(method, path string, body interface{}) (*http.R
 	return c.client.Do(req)
 }
 
-// Add 添加内存
-func (c *MemoryClient) Add(messages interface{}, options types.MemoryOptions) ([]types.Memory, error) {
+// AddAsync adds a new memory asynchronously
+// `messages` can be a string, []string, types.Message, or []types.Message
+// Returns an event whose status can be used to track the outcome of the memory addition
+func (c *MemoryClient) AddAsync(messages interface{}, options types.MemoryOptions) ([]types.MemoryAddAEvent, error) {
 	payload, err := c.preparePayload(messages, options)
 	if err != nil {
 		return nil, err
@@ -217,15 +230,46 @@ func (c *MemoryClient) Add(messages interface{}, options types.MemoryOptions) ([
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		// 读取并打印响应体
-		body, _ := io.ReadAll(resp.Body)
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
+	}
+
+	var events []types.MemoryAddAEvent
+	if err := json.Unmarshal(body, &events); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
+	}
+
+	return events, nil
+}
+
+// Add adds a new memory synchronously
+// `messages` can be a string, []string, types.Message, or []types.Message
+// Returns the created memories
+func (c *MemoryClient) Add(messages interface{}, options types.MemoryOptions) ([]types.Memory, error) {
+	payload, err := c.preparePayload(messages, options)
+	if err != nil {
+		return nil, err
+	}
+	payload["async_mode"] = false
+
+	resp, err := c.doRequest("POST", "/v1/memories/", payload)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+
 		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var memories []types.Memory
-	if err := json.NewDecoder(resp.Body).Decode(&memories); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &memories); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return memories, nil
@@ -243,13 +287,15 @@ func (c *MemoryClient) Update(memoryID string, message string) ([]types.Memory, 
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var memories []types.Memory
-	if err := json.NewDecoder(resp.Body).Decode(&memories); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &memories); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return memories, nil
@@ -263,55 +309,85 @@ func (c *MemoryClient) Get(memoryID string) (*types.Memory, error) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		// 读取并打印响应体
-		body, _ := io.ReadAll(resp.Body)
 		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var memory types.Memory
-	if err := json.NewDecoder(resp.Body).Decode(&memory); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &memory); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return &memory, nil
 }
 
-// GetAll 获取所有内存
 func (c *MemoryClient) GetAll(options *types.SearchOptions) ([]types.Memory, error) {
-	path := "/v1/memories/"
+	path := "/v2/memories/"
+
+	type getAllRequest struct {
+		Page      int            `json:"page,omitempty"`
+		PageSize  int            `json:"page_size,omitempty"`
+		OrgID     string         `json:"org_id,omitempty"`
+		ProjectID string         `json:"project_id,omitempty"`
+		Fields    []string       `json:"fields,omitempty"`
+		Filters   map[string]any `json:"filters,omitempty"`
+	}
+
+	var req getAllRequest
+
 	if options != nil {
-		query := options.ToQuery()
-		if query != "" {
-			path += "?" + query
+		req = getAllRequest{
+			Page:      options.Page,
+			PageSize:  options.PageSize,
+			Fields:    options.Fields,
+			Filters:   options.Filters,
+			OrgID:     options.OrgID,
+			ProjectID: options.ProjectID,
+		}
+
+		if req.OrgID == "" {
+			req.OrgID = c.organizationID
+		}
+		if req.ProjectID == "" {
+			req.ProjectID = c.projectID
+		}
+
+		if req.Filters == nil {
+			req.Filters = make(map[string]any)
+		}
+
+		if options.Version.IsDefault() {
+			req.Filters = fixAPIV2Filters(req.Filters)
 		}
 	}
 
-	resp, err := c.doRequest("GET", path, nil)
+	resp, err := c.doRequest("POST", path, req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var memories []types.Memory
-	if err := json.NewDecoder(resp.Body).Decode(&memories); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &memories); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return memories, nil
 }
 
-// Search 搜索内存
 func (c *MemoryClient) Search(query string, options *types.SearchOptions) ([]types.Memory, error) {
 	if options == nil {
 		options = &types.SearchOptions{}
 	}
 
-	// 添加组织和项目信息
 	if c.organizationName != "" && c.projectName != "" {
 		options.OrgName = c.organizationName
 		options.ProjectName = c.projectName
@@ -322,12 +398,10 @@ func (c *MemoryClient) Search(query string, options *types.SearchOptions) ([]typ
 		options.ProjectID = c.projectID
 	}
 
-	// 准备请求体
 	payload := map[string]interface{}{
 		"query": query,
 	}
 
-	// 将 options 转换为 map
 	optionsMap := make(map[string]interface{})
 	optionsBytes, err := json.Marshal(options)
 	if err != nil {
@@ -343,25 +417,49 @@ func (c *MemoryClient) Search(query string, options *types.SearchOptions) ([]typ
 			payload[k] = v
 		}
 	}
+	if filters, ok := payload["filters"]; ok && options.Version.IsDefault() {
+		payload["filters"] = fixAPIV2Filters(filters.(map[string]any))
+		payload["filter_memories"] = true
+	}
 
-	resp, err := c.doRequest("POST", "/v1/memories/search/", payload)
+	resp, err := c.doRequest("POST", "/v2/memories/search/", payload)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		// 读取并打印响应体
-		body, _ := io.ReadAll(resp.Body)
 		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var memories []types.Memory
-	if err := json.NewDecoder(resp.Body).Decode(&memories); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &memories); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return memories, nil
+}
+
+func fixAPIV2Filters(filters map[string]any) map[string]any {
+	if filters == nil {
+		filters = make(map[string]any)
+	}
+	// Albeit you can create memories with agent_id, this is not stored in the memory
+	// and filtering by it will not return any memories.
+	delete(filters, "agent_id")
+
+	if _, ok := filters["user_id"]; !ok {
+		filters["user_id"] = types.SearchWildcard
+	}
+	if _, ok := filters["app_id"]; !ok {
+		filters["app_id"] = types.SearchWildcard
+	}
+	if _, ok := filters["run_id"]; !ok {
+		filters["run_id"] = types.SearchWildcard
+	}
+	return filters
 }
 
 // Delete 删除内存
@@ -373,7 +471,7 @@ func (c *MemoryClient) Delete(memoryID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// 读取并打印响应体
+
 		body, _ := io.ReadAll(resp.Body)
 		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
@@ -394,8 +492,10 @@ func (c *MemoryClient) DeleteAll(options types.MemoryOptions) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
@@ -409,13 +509,15 @@ func (c *MemoryClient) History(memoryID string) ([]types.MemoryHistory, error) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var history []types.MemoryHistory
-	if err := json.NewDecoder(resp.Body).Decode(&history); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &history); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return history, nil
@@ -429,13 +531,15 @@ func (c *MemoryClient) Users() (*types.AllUsers, error) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var users types.AllUsers
-	if err := json.NewDecoder(resp.Body).Decode(&users); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &users); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return &users, nil
@@ -449,8 +553,10 @@ func (c *MemoryClient) DeleteUser(entityID string) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
@@ -464,8 +570,10 @@ func (c *MemoryClient) DeleteUsers() error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
@@ -479,8 +587,10 @@ func (c *MemoryClient) BatchUpdate(memories []types.MemoryUpdateBody) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
@@ -494,8 +604,10 @@ func (c *MemoryClient) BatchDelete(memoryIDs []string) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
@@ -514,13 +626,15 @@ func (c *MemoryClient) GetProject(options types.ProjectOptions) (*types.ProjectR
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var project types.ProjectResponse
-	if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &project); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return &project, nil
@@ -534,8 +648,10 @@ func (c *MemoryClient) UpdateProject(payload types.PromptUpdatePayload) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
@@ -554,13 +670,15 @@ func (c *MemoryClient) GetWebhooks(projectID string) ([]types.Webhook, error) {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var webhooks []types.Webhook
-	if err := json.NewDecoder(resp.Body).Decode(&webhooks); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &webhooks); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return webhooks, nil
@@ -574,13 +692,15 @@ func (c *MemoryClient) CreateWebhook(webhook types.WebhookPayload) (*types.Webho
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	var createdWebhook types.Webhook
-	if err := json.NewDecoder(resp.Body).Decode(&createdWebhook); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &createdWebhook); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
 	}
 
 	return &createdWebhook, nil
@@ -594,8 +714,10 @@ func (c *MemoryClient) UpdateWebhook(webhook types.WebhookPayload) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
@@ -609,8 +731,10 @@ func (c *MemoryClient) DeleteWebhook(webhookID string) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
@@ -624,9 +748,60 @@ func (c *MemoryClient) Feedback(payload types.FeedbackPayload) error {
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return &APIError{Message: fmt.Sprintf("API request failed with status %d", resp.StatusCode)}
+		return &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 
 	return nil
+}
+
+// GetEvent 获取事件
+func (c *MemoryClient) GetEvent(eventID string) (*types.Event, error) {
+	resp, err := c.doRequest("GET", fmt.Sprintf("/v1/event/%s/", eventID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
+	}
+
+	var event types.Event
+	if err := json.Unmarshal(body, &event); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
+	}
+
+	return &event, nil
+}
+
+func (c *MemoryClient) GetEvents(cursor string) (*types.GetEventsResponse, error) {
+	path := "/v1/events/"
+	if cursor != "" {
+		// Cursor is the URL
+		path = cursor
+	}
+
+	resp, err := c.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, errors.Wrap(err, "failed to get events")
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
+	}
+
+	var events types.GetEventsResponse
+	if err := json.Unmarshal(body, &events); err != nil {
+		return nil, errors.Wrap(err, "failed to unmarshal response")
+	}
+
+	return &events, nil
 }
