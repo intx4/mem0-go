@@ -32,18 +32,21 @@ const (
 	VeryNegative Feedback = "VERY_NEGATIVE"
 )
 
-// MemoryOptions 定义内存选项
+// MemoryOptions
+// TODO: intx4 -- rework these options to distinguish between Add and Search options
 type MemoryOptions struct {
-	APIVersion         APIVersion       `json:"api_version,omitempty"`
-	Version            APIVersion       `json:"version,omitempty"`
-	UserID             string           `json:"user_id,omitempty"`
-	AgentID            string           `json:"agent_id,omitempty"`
-	AppID              string           `json:"app_id,omitempty"`
-	RunID              string           `json:"run_id,omitempty"`
-	Metadata           map[string]any   `json:"metadata,omitempty"`
+	APIVersion APIVersion     `json:"api_version,omitempty"`
+	Version    APIVersion     `json:"version,omitempty"`
+	UserID     string         `json:"user_id,omitempty"`
+	AgentID    string         `json:"agent_id,omitempty"`
+	AppID      string         `json:"app_id,omitempty"`
+	RunID      string         `json:"run_id,omitempty"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
+
+	// Filters for GetAll and Search
+	// NOTE: you MUST not specify both agent_id and user_id as they pertain to different isolated scopes
+	// See https://docs.mem0.ai/platform/features/v2-memory-filters#best-practices
 	Filters            map[string]any   `json:"filters,omitempty"`
-	OrgName            string           `json:"org_name,omitempty"`     // 已弃用
-	ProjectName        string           `json:"project_name,omitempty"` // 已弃用
 	OrgID              string           `json:"org_id,omitempty"`
 	ProjectID          string           `json:"project_id,omitempty"`
 	Infer              bool             `json:"infer,omitempty"`

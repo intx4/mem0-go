@@ -34,14 +34,12 @@ type ClientOptions struct {
 
 // MemoryClient 定义内存客户端
 type MemoryClient struct {
-	apiKey           string
-	host             string
-	organizationName string
-	projectName      string
-	organizationID   string
-	projectID        string
-	client           *http.Client
-	telemetryID      string
+	apiKey         string
+	host           string
+	organizationID string
+	projectID      string
+	client         *http.Client
+	telemetryID    string
 }
 
 // NewMemoryClient 创建新的内存客户端
@@ -55,12 +53,10 @@ func NewMemoryClient(options ClientOptions) (*MemoryClient, error) {
 	}
 
 	client := &MemoryClient{
-		apiKey:           options.APIKey,
-		host:             options.Host,
-		organizationName: options.OrganizationName,
-		projectName:      options.ProjectName,
-		organizationID:   options.OrganizationID,
-		projectID:        options.ProjectID,
+		apiKey:         options.APIKey,
+		host:           options.Host,
+		organizationID: options.OrganizationID,
+		projectID:      options.ProjectID,
 		client: &http.Client{
 			Timeout: 60 * time.Second,
 		},
@@ -79,10 +75,6 @@ func NewMemoryClient(options ClientOptions) (*MemoryClient, error) {
 
 // validateOrgProject 验证组织和项目
 func (c *MemoryClient) validateOrgProject() error {
-	if (c.organizationName == "" && c.projectName != "") || (c.organizationName != "" && c.projectName == "") {
-		return errors.New("both organizationName and projectName must be provided together")
-	}
-
 	if (c.organizationID == "" && c.projectID != "") || (c.organizationID != "" && c.projectID == "") {
 		return errors.New("both organizationID and projectID must be provided together")
 	}
@@ -152,11 +144,6 @@ func (c *MemoryClient) preparePayload(messages interface{}, options types.Memory
 		payload["messages"] = m
 	default:
 		return nil, errors.New("invalid messages type")
-	}
-
-	if c.organizationName != "" && c.projectName != "" {
-		options.OrgName = c.organizationName
-		options.ProjectName = c.projectName
 	}
 
 	if c.organizationID != "" && c.projectID != "" {
@@ -386,11 +373,6 @@ func (c *MemoryClient) GetAll(options *types.SearchOptions) ([]types.Memory, err
 func (c *MemoryClient) Search(query string, options *types.SearchOptions) ([]types.Memory, error) {
 	if options == nil {
 		options = &types.SearchOptions{}
-	}
-
-	if c.organizationName != "" && c.projectName != "" {
-		options.OrgName = c.organizationName
-		options.ProjectName = c.projectName
 	}
 
 	if c.organizationID != "" && c.projectID != "" {
