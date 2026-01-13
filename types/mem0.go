@@ -41,6 +41,7 @@ type MemoryOptions struct {
 	AgentID    string         `json:"agent_id,omitempty"`
 	AppID      string         `json:"app_id,omitempty"`
 	RunID      string         `json:"run_id,omitempty"`
+	Timestamp  int64          `json:"timestamp,omitempty"`
 	Metadata   map[string]any `json:"metadata,omitempty"`
 
 	// Filters for GetAll and Search
