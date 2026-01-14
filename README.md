@@ -1,3 +1,25 @@
+# This fork
+
+Upgrades the original to Mem0 V2 API.
+
+**NOTE**: this shall be regarded as an MVP and not as a fully-fledged Mem0 Go client.
+
+## Installation
+**THIS WON'T WORK**
+```
+go get github.com/intx4/mem0-go
+```
+Instead, fetch the latest version from the output of the command above (e.g. `v0.0.0-20260114100254-688eb5c13010`)
+and use it to insert a `replace` directive in your `go.mod` as such:
+```
+replace github.com/bytectlgo/mem0-go => github.com/intx4/mem0-go v0.0.0-20260113080456-7f54441e2c2b
+```
+then simply:
+```
+go get github.com/bytectlgo/mem0-go
+```
+
+
 # Mem0 Go Client
 
 [中文文档 (Chinese Documentation)](README_ZH.md)
