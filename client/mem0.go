@@ -314,12 +314,13 @@ func (c *MemoryClient) GetAll(options *types.SearchOptions) ([]types.Memory, err
 	path := "/v2/memories/"
 
 	type getAllRequest struct {
-		Page      int            `json:"page,omitempty"`
-		PageSize  int            `json:"page_size,omitempty"`
-		OrgID     string         `json:"org_id,omitempty"`
-		ProjectID string         `json:"project_id,omitempty"`
-		Fields    []string       `json:"fields,omitempty"`
-		Filters   map[string]any `json:"filters,omitempty"`
+		Page       int                 `json:"page,omitempty"`
+		PageSize   int                 `json:"page_size,omitempty"`
+		OrgID      string              `json:"org_id,omitempty"`
+		ProjectID  string              `json:"project_id,omitempty"`
+		Fields     []string            `json:"fields,omitempty"`
+		Filters    map[string]any      `json:"filters,omitempty"`
+		Categories map[string][]string `json:"categories,omitempty"`
 	}
 
 	var req getAllRequest
@@ -348,6 +349,23 @@ func (c *MemoryClient) GetAll(options *types.SearchOptions) ([]types.Memory, err
 		if options.Version.IsDefault() {
 			req.Filters = fixAPIV2Filters(req.Filters)
 		}
+
+		_, hasAgentID := req.Filters["agent_id"]
+		_, hasUserID := req.Filters["user_id"]
+		if hasAgentID && hasUserID {
+			return nil, errors.New("agent_id and user_id cannot be used together")
+		}
+
+		if len(options.Categories) > 0 {
+			req.Categories = map[string][]string{
+				"in": options.Categories,
+			}
+			if _, hasCategories := req.Filters["categories"]; hasCategories {
+				return nil, errors.New("categories must be specified outside of filters and inside SearchOptions")
+			}
+			req.Filters["categories"] = req.Categories
+		}
+
 	}
 
 	resp, err := c.doRequest("POST", path, req)
@@ -428,10 +446,8 @@ func fixAPIV2Filters(filters map[string]any) map[string]any {
 	if filters == nil {
 		filters = make(map[string]any)
 	}
-	// Albeit you can create memories with agent_id, this is not stored in the memory
-	// and filtering by it will not return any memories.
-	delete(filters, "agent_id")
-
+	// Avoid failing the query for missing fields.
+	// Instead, fill with a wildcard.
 	if _, ok := filters["user_id"]; !ok {
 		filters["user_id"] = types.SearchWildcard
 	}

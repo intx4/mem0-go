@@ -62,7 +62,7 @@ func TestAccAddMemoryAndRetrieveEventAsync(t *testing.T) {
 
 	message := types.Message{
 		Role:    "user",
-		Content: "Client prefers NET30 payment terms and 1 week delivery time. Client prefers fresh fruits and vegetables and meat.",
+		Content: "Client was onboarded on 2025-02-03 and is a new customer. He likes churros and ice cream, but not burgers. He LOVES pizza tho",
 	}
 
 	events, err := client.AddAsync(message, types.MemoryOptions{
@@ -189,6 +189,9 @@ func TestAccGetAllMemories(t *testing.T) {
 					"lte": time.Now().Format(time.RFC3339),
 				},
 			},
+		},
+		Categories: []string{
+			"product_preferences",
 		},
 	})
 	if err != nil {
