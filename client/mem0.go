@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -682,9 +683,15 @@ func (c *MemoryClient) GetWebhooks(projectID string) ([]types.Webhook, error) {
 	return webhooks, nil
 }
 
-// CreateWebhook 创建 Webhook
-func (c *MemoryClient) CreateWebhook(webhook types.WebhookPayload) (*types.Webhook, error) {
-	resp, err := c.doRequest("POST", "/v1/webhooks/", webhook)
+var (
+	ErrDuplicateWebhook = errors.New("a webhook with the same project and url already exists")
+)
+
+func (c *MemoryClient) CreateWebhook(projectID string, webhook types.WebhookPayload) (*types.Webhook, error) {
+	if projectID == "" {
+		return nil, errors.New("project_id is required")
+	}
+	resp, err := c.doRequest("POST", fmt.Sprintf("/api/v1/webhooks/projects/%s/", projectID), webhook)
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +699,11 @@ func (c *MemoryClient) CreateWebhook(webhook types.WebhookPayload) (*types.Webho
 
 	body, _ := io.ReadAll(resp.Body)
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusCreated {
+		if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(body), "must make a unique set.") {
+			return nil, ErrDuplicateWebhook
+		}
+
 		return nil, &APIError{Message: fmt.Sprintf("API request failed with status %d: %s", resp.StatusCode, string(body))}
 	}
 

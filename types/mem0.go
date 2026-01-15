@@ -226,6 +226,7 @@ type Webhook struct {
 	WebhookID  string         `json:"webhook_id,omitempty"`
 	Name       string         `json:"name"`
 	URL        string         `json:"url"`
+	Owner      string         `json:"owner,omitempty"`
 	Project    string         `json:"project,omitempty"`
 	CreatedAt  time.Time      `json:"created_at,omitempty"`
 	UpdatedAt  time.Time      `json:"updated_at,omitempty"`
@@ -233,11 +234,9 @@ type Webhook struct {
 	EventTypes []WebhookEvent `json:"event_types,omitempty"`
 }
 
-// WebhookPayload 定义 Webhook 请求体
+// WebhookPayload is the payload for creating a webhook
 type WebhookPayload struct {
-	EventTypes []WebhookEvent `json:"eventTypes"`
-	ProjectID  string         `json:"projectId"`
-	WebhookID  string         `json:"webhookId"`
+	EventTypes []WebhookEvent `json:"event_types"`
 	Name       string         `json:"name"`
 	URL        string         `json:"url"`
 }

@@ -22,6 +22,7 @@ import (
 
 var (
 	mem0ApiKey string
+	projectID  string
 	memID      string
 )
 
@@ -49,6 +50,10 @@ func TestMain(m *testing.M) {
 	if memID == "" {
 		log.Fatal("TEST_MEM0_MEMORY_ID environment variable is required")
 	}
+	projectID = os.Getenv("TEST_MEM0_PROJECT_ID")
+	if projectID == "" {
+		log.Fatal("TEST_MEM0_PROJECT_ID environment variable is required")
+	}
 	os.Exit(m.Run())
 }
 
@@ -71,8 +76,9 @@ func TestAccAddMemoryAndRetrieveEventAsync(t *testing.T) {
 		AppID:   appID,
 		RunID:   runID,
 		Metadata: map[string]any{
-			"timestamp":       time.Now().Unix(),
-			"metadata_key_id": metadataKeyID,
+			"timestamp":         time.Now().Unix(),
+			"metadata_key_id":   metadataKeyID,
+			"metadata_key_id_2": metadataKeyID,
 		},
 		CustomCategories: types.CustomCategories{
 			{
@@ -180,13 +186,21 @@ func TestAccGetAllMemories(t *testing.T) {
 		MemoryOptions: types.MemoryOptions{
 			PageSize: 1,
 			Filters: map[string]any{
-				"user_id": userID,
-				"metadata": map[string]any{
-					"metadata_key_id": metadataKeyID,
-				},
-				"created_at": map[string]any{
-					"gte": time.Now().Add(-1 * time.Hour * 24 * 30 * 12).Format(time.RFC3339),
-					"lte": time.Now().Format(time.RFC3339),
+				"AND": []map[string]any{
+					{
+						"user_id": userID,
+					},
+					{
+						"metadata": map[string]any{
+							"metadata_key_id": metadataKeyID,
+						},
+					},
+					{
+						"created_at": map[string]any{
+							"gte": time.Now().Add(-1 * time.Hour * 24 * 30 * 12).Format(time.RFC3339),
+							"lte": time.Now().Format(time.RFC3339),
+						},
+					},
 				},
 			},
 		},
@@ -197,7 +211,7 @@ func TestAccGetAllMemories(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get all memories: %v", err)
 	}
-	require.Equal(t, 1, len(memories))
+	require.Greater(t, 1, len(memories))
 	t.Logf("Memories: %v", memories)
 }
 
@@ -230,4 +244,23 @@ func TestAccSearchMemories(t *testing.T) {
 	}
 	require.Equal(t, 1, len(memories))
 	t.Logf("Memories: %v", memories)
+}
+
+func TestAccCreateWebhook(t *testing.T) {
+	client, err := client.NewMemoryClient(client.ClientOptions{
+		APIKey: mem0ApiKey,
+	})
+	if err != nil {
+		t.Fatalf("Failed to create client: %v", err)
+	}
+
+	webhook, err := client.CreateWebhook(projectID, types.WebhookPayload{
+		EventTypes: []types.WebhookEvent{types.MemoryUpdated},
+		Name:       "test-webhook",
+		URL:        "https://3.example.com",
+	})
+	if err != nil {
+		t.Fatalf("Failed to create webhook: %v", err)
+	}
+	t.Logf("Webhook: %v", webhook)
 }

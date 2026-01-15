@@ -2,7 +2,7 @@
 
 Upgrades the original to Mem0 V2 API.
 
-**NOTE**: this shall be regarded as an MVP and not as a fully-fledged Mem0 Go client.
+**NOTE**: this shall be regarded as an MVP and not as a fully-fledged Mem0 Go client. As such, NOT ALL endpoint have been migrated to v2 and might NOT WORK.
 
 ## Installation
 **THIS WON'T WORK**
